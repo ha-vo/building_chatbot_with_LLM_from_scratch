@@ -20,13 +20,14 @@ def add_ws_marker(s):
 
 NEG_INF = -float('inf')
 def log_add(a, b):
-    if a == NEG_INF or a == NEG_INF:
+    if a == NEG_INF:
         return b
-    if b == NEG_INF or b == NEG_INF:
+    if b == NEG_INF:
         return a
     if a < b:
         a, b = b, a
     return a + math.log1p(math.exp(b - a))
+
 
 
 
@@ -42,15 +43,12 @@ def generate_seed_candidates(corpus, maxSubword = 16, minCount = 2,
         n = len(marked)
 
         for i in range(n):
-            isStartOfWord = (marked[i] == WS_MARK)
             maxL = min(maxSubword, n-i)
             
             for l in range(1, maxL + 1):
                 sub = marked[i:i+l]
-                if isStartOfWord:
-                    counts[sub] += 1
-                else:
-                    if WS_MARK not in sub: counts[sub] += 1
+                if WS_MARK in sub[1:]: continue
+                counts[sub] += 1
 
     if counts.get(WS_MARK,0) == 0: counts[WS_MARK] = 1
 
@@ -60,10 +58,20 @@ def generate_seed_candidates(corpus, maxSubword = 16, minCount = 2,
     candidates = candidates[:maxCandidates]
     return dict(candidates)
     
-def probability(counts):
+def probability(counts, eps = 1e-12):
     s = sum(counts.values())
-    if s == 0: return {k: 1.0/len(counts) for k in counts}
-    return {k: max(v/s, 1e-12) for k,v in counts.items()}
+    if s == 0:
+        n = len(counts)
+        return {k: 1.0/n for k in counts}
+    
+    probs = {k: v / s for k, v in counts.items()}
+    clipped = {}
+    for k, p in probs.items():
+        clipped[k] = p if p >= eps else eps
+
+   
+    total = sum(clipped.values())
+    return {k: v / total for k, v in clipped.items()}
 
 def forward_backward(markedText, vocab, maxTokenLen):
     s = markedText
@@ -149,10 +157,26 @@ class Trainer:
 
     def caculateProb(self, corpusLines, candidates = 200000):
         seed = generate_seed_candidates(corpusLines, self.maxTokenLen, self.seedMinCount, candidates)
+        # ensure single-char tokens exist (except WS_MARK in middle)
+        char_counts = Counter()
+        for line in corpusLines:
+            norm = normalizeText(line)
+            if not norm: continue
+            marked = add_ws_marker(norm)
+            for ch in marked:
+                # allow WS_MARK and normal chars
+                char_counts[ch] += 1
+
+        # add single-char tokens from corpus with tiny counts if missing
+        for ch, cnt in char_counts.items():
+            if ch not in seed:
+                seed[ch] = 1e-6
+
         self.vocab = probability(seed)
         if WS_MARK not in self.vocab:
             self.vocab[WS_MARK] = 1e-12
         self.vocab = probability(self.vocab)
+
         
     
     def train(self, corpusLines, maxIters = 20):
@@ -191,7 +215,7 @@ class Trainer:
 
     def prune(self):
         n = len(self.vocab)
-        removeN = max(int(n*0.2), n- self.targetVocabSize)
+        removeN = min(int(n*0.05), n- self.targetVocabSize)
         if removeN <= 0: return
 
         items = sorted(self.vocab.items(), key = lambda x: x[1])
@@ -229,7 +253,7 @@ class UnigramTokenizer:
         s = "".join(tokens)
         return s.replace(WS_MARK, " ").strip()
     
-def saveModel(modelName, vocab, maxTokenLen):
+def saveModel(modelName, vocab, maxTokenLen=24):
     modelPath = f"{modelName}.json"
     encoding = {}
     decoding = {}
