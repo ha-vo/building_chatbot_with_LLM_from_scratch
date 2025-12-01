@@ -3,6 +3,7 @@ import math
 import json
 import unicodedata
 from collections import defaultdict, Counter
+import matplotlib.pyplot as plt
 
 
 # this special character is rarely found in text (replacement for " ")
@@ -154,6 +155,7 @@ class Trainer:
         self.maxTokenLen = maxTokenLen
         self.seedMinCount = seedMinCount
         self.vocab = {}
+        self.logll = []
 
     def caculateProb(self, corpusLines, candidates = 200000):
         seed = generate_seed_candidates(corpusLines, self.maxTokenLen, self.seedMinCount, candidates)
@@ -179,7 +181,7 @@ class Trainer:
 
         
     
-    def train(self, corpusLines, maxIters = 20):
+    def train(self, corpusLines, maxIters = 15):
         corpus = []
         for l in corpusLines:
             norm = normalizeText(l)
@@ -197,7 +199,7 @@ class Trainer:
                 logLikelihood += ll
                 for k,v in e.items():
                     expected[k] += v
-
+            self.logll.append(round(logLikelihood,3))
             print(f"log likelihood: {logLikelihood:.2f}")
 
             newCount = {}
@@ -274,6 +276,14 @@ def loadModel(modelPath):
     with open(modelPath, "r", encoding="utf8") as f:
         data = json.load(f)
     return data
+
+def drawLoglikelihood(ll):
+    iters = [i for i in range(1, len(ll)+1)]
+    fig, ax = plt.subplots() 
+    ax.plot(iters, ll, marker='o')
+    ax.set_xlabel("Training Iteration (EM Step)") 
+    ax.set_ylabel("Log Likelihood")  
+    plt.show()
 
 
 
